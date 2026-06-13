@@ -1,3 +1,2 @@
 #!/bin/sh
-python3 monitor.py &
-./xray -config config.json
+python3 monitor.py
