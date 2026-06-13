@@ -39,14 +39,14 @@ print("==> Step 3: Launching Xray Core as sub-process...")
 # تشغيل الـ Xray بالملف المحدث ديريكت
 xray_proc = subprocess.Popen(["./xray", "-config", "config.json"])
 
-print("==> Step 4: Starting background sync loop for new users...")
 monitored_emails = [u["email"] for u in active_users]
-time.sleep(2)
+time.sleep(5) # وقت مريح لفتح البورتات الداخلية 10085 تماماً
 
 def get_user_traffic(email):
     try:
         payload = {"pattern": email, "reset": False}
         cmd = ["./xray", "api", "--server=127.0.0.1:10085", "xray.app.stats.command.StatsService.QueryStats"]
+        # التعديل الصح: تمرير الـ JSON عبر الـ stdin (input) باش الـ Xray يقراه
         res = subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
         if res.returncode == 0 and res.stdout:
             data = json.loads(res.stdout)
@@ -56,6 +56,7 @@ def get_user_traffic(email):
     return 0
 
 def block_user_dynamic(email):
+    print(f"[-] Removing/Blocking user from Xray memory: {email}")
     payload = {
         "tag": "vless-in",
         "operation": {
@@ -79,28 +80,44 @@ def add_user_dynamic(u_uuid, email):
     }
     cmd = ["./xray", "api", "--server=127.0.0.1:10085", "xray.app.proxyman.command.HandlerService.AlterInbound"]
     res = subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
-    return res.returncode == 0
+    if res.returncode == 0:
+        print(f"[+] Successfully injected new user فالوسط: {email}")
+        return True
+    return False
 
-# اللوب الدوري لتحديث البيانات ومراقبة المقصلة (50 ميجا)
+print("==> Step 4: Entering dynamic state sync loop...")
 while True:
     if xray_proc.poll() is not None:
-        print("[-] Xray core stopped. Exiting script.")
+        print("[-] Xray core crashed or stopped. Exiting.")
         break
+        
     try:
+        # 1. جلب القائمة الحية الحالية من راندر
         res = requests.get(f"{API_URL}/get_active_users", timeout=10)
         if res.status_code == 200:
-            for u in res.json():
+            api_users = res.json()
+            api_emails = {u['email'] for u in api_users}
+            
+            # أ. حقن أي مستخدم جديد دخل فالوسط
+            for u in api_users:
                 if u['email'] not in monitored_emails:
                     if add_user_dynamic(u['uuid'], u['email']):
                         monitored_emails.append(u['email'])
-    except: pass
+            
+            # ب. طرد وتطهير أي مستخدم خرج من القائمة النشطة (تبلوكا أو انتهى)
+            for email in list(monitored_emails):
+                if email not in api_emails:
+                    block_user_dynamic(email)
+                    monitored_emails.remove(email)
+    except Exception as e:
+        print(f"Error syncing list from Render: {e}")
 
+    # 2. إرسال الترافيك المستهلك دورياً لراندر لغرض الحساب والمقصلة
     for email in list(monitored_emails):
         usage = get_user_traffic(email)
         try:
-            res = requests.post(f"{API_URL}/sync_usage", json={"email": email, "bytes": usage}, timeout=10)
-            if res.status_code == 200 and res.json().get("status") == "block":
-                block_user_dynamic(email)
-                monitored_emails.remove(email)
+            # يبعث الميڨات الحقيقية لراندر
+            requests.post(f"{API_URL}/sync_usage", json={"email": email, "bytes": usage}, timeout=10)
         except: pass
+        
     time.sleep(15)
