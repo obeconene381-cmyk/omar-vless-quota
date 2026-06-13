@@ -8,8 +8,9 @@ API_URL = "https://try-rhon.onrender.com"
 def get_user_traffic(email):
     try:
         payload = {"pattern": email, "reset": False}
-        cmd = ["./xray", "api", "--server=127.0.0.1:10085", "xray.app.stats.command.StatsService.QueryStats", json.dumps(payload)]
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        cmd = ["./xray", "api", "--server=127.0.0.1:10085", "xray.app.stats.command.StatsService.QueryStats"]
+        # التعديل: تمرير البيانات عبر الـ stdin (input)
+        res = subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
         if res.returncode == 0 and res.stdout:
             data = json.loads(res.stdout)
             if "stat" in data:
@@ -26,8 +27,9 @@ def block_user_dynamic(email):
             "email": email
         }
     }
-    cmd = ["./xray", "api", "--server=127.0.0.1:10085", "xray.app.proxyman.command.HandlerService.AlterInbound", json.dumps(payload)]
-    subprocess.run(cmd)
+    cmd = ["./xray", "api", "--server=127.0.0.1:10085", "xray.app.proxyman.command.HandlerService.AlterInbound"]
+    # التعديل: تمرير البيانات عبر الـ stdin (input)
+    subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
 
 def add_user_dynamic(u_uuid, email):
     print(f"[+] Activating user dynamic: {email} | UUID: {u_uuid}")
@@ -45,14 +47,16 @@ def add_user_dynamic(u_uuid, email):
             }
         }
     }
-    cmd = ["./xray", "api", "--server=127.0.0.1:10085", "xray.app.proxyman.command.HandlerService.AlterInbound", json.dumps(payload)]
-    subprocess.run(cmd)
+    cmd = ["./xray", "api", "--server=127.0.0.1:10085", "xray.app.proxyman.command.HandlerService.AlterInbound"]
+    # التعديل: تمرير البيانات عبر الـ stdin (input)
+    subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
 
 monitored_emails = []
 
 print("-> Sync Monitor Started successfully...")
 try:
-    res = requests.get(f"{API_URL}/get_active_users", timeout=5)
+    # رفعنا الـ timeout لـ 15 ثانية لأن سيرفر راندر المجاني يطول باش يشعل أول مرة
+    res = requests.get(f"{API_URL}/get_active_users", timeout=15)
     if res.status_code == 200:
         for u in res.json():
             add_user_dynamic(u['uuid'], u['email'])
@@ -63,7 +67,7 @@ except Exception as e:
 print("-> Entering main sync loop...")
 while True:
     try:
-        res = requests.get(f"{API_URL}/get_active_users", timeout=5)
+        res = requests.get(f"{API_URL}/get_active_users", timeout=15)
         if res.status_code == 200:
             all_actives = res.json()
             for u in all_actives:
@@ -76,7 +80,7 @@ while True:
     for email in list(monitored_emails):
         usage = get_user_traffic(email)
         try:
-            res = requests.post(f"{API_URL}/sync_usage", json={"email": email, "bytes": usage}, timeout=5)
+            res = requests.post(f"{API_URL}/sync_usage", json={"email": email, "bytes": usage}, timeout=15)
             if res.status_code == 200:
                 status_data = res.json()
                 if status_data.get("status") == "block":
