@@ -5,11 +5,14 @@ import requests
 
 API_URL = "https://try-rhon.onrender.com" 
 
+# 🛑 خطة دفاعية: انتظر 5 ثوانٍ كاملة حتى يشتغل الـ Xray ويفتح البورت 10085 تماماً
+print("⏳ Waiting 5 seconds for Xray core to initialize internal ports...")
+time.sleep(5)
+
 def get_user_traffic(email):
     try:
         payload = {"pattern": email, "reset": False}
         cmd = ["./xray", "api", "--server=127.0.0.1:10085", "xray.app.stats.command.StatsService.QueryStats"]
-        # التعديل: تمرير البيانات عبر الـ stdin (input)
         res = subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
         if res.returncode == 0 and res.stdout:
             data = json.loads(res.stdout)
@@ -28,11 +31,9 @@ def block_user_dynamic(email):
         }
     }
     cmd = ["./xray", "api", "--server=127.0.0.1:10085", "xray.app.proxyman.command.HandlerService.AlterInbound"]
-    # التعديل: تمرير البيانات عبر الـ stdin (input)
     subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
 
 def add_user_dynamic(u_uuid, email):
-    print(f"[+] Activating user dynamic: {email} | UUID: {u_uuid}")
     payload = {
         "tag": "vless-in",
         "operation": {
@@ -44,27 +45,23 @@ def add_user_dynamic(u_uuid, email):
                     "@type": "type.googleapis.com/xray.proxy.vless.Account",
                     "id": u_uuid
                 }
-            }
+              }
         }
     }
     cmd = ["./xray", "api", "--server=127.0.0.1:10085", "xray.app.proxyman.command.HandlerService.AlterInbound"]
-    # التعديل: تمرير البيانات عبر الـ stdin (input)
-    subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
+    res = subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
+    
+    # لا نعتبر المستخدم مفعل إلا إذا نجح الأمر داخلياً ورجع كود 0
+    if res.returncode == 0:
+        print(f"[+] Successfully activated user: {email} | UUID: {u_uuid}")
+        return True
+    else:
+        print(f"❌ Failed to inject user via Xray API: {res.stderr}")
+        return False
 
 monitored_emails = []
-
 print("-> Sync Monitor Started successfully...")
-try:
-    # رفعنا الـ timeout لـ 15 ثانية لأن سيرفر راندر المجاني يطول باش يشعل أول مرة
-    res = requests.get(f"{API_URL}/get_active_users", timeout=15)
-    if res.status_code == 200:
-        for u in res.json():
-            add_user_dynamic(u['uuid'], u['email'])
-            monitored_emails.append(u['email'])
-except Exception as e:
-    print(f"Initial fetch error: {e}")
 
-print("-> Entering main sync loop...")
 while True:
     try:
         res = requests.get(f"{API_URL}/get_active_users", timeout=15)
@@ -72,8 +69,9 @@ while True:
             all_actives = res.json()
             for u in all_actives:
                 if u['email'] not in monitored_emails:
-                    add_user_dynamic(u['uuid'], u['email'])
-                    monitored_emails.append(u['email'])
+                    # محاولة الحقن، وإذا نجحت فقط نضيفه للمراقبة
+                    if add_user_dynamic(u['uuid'], u['email']):
+                        monitored_emails.append(u['email'])
     except Exception as e:
         print(f"Error fetching active users: {e}")
 
