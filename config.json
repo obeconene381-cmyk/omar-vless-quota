@@ -35,8 +35,7 @@
     "domainStrategy": "AsIs",
     "rules": [
       { "type": "field", "inboundTag": [ "api" ], "outboundTag": "api" },
-      { "type": "field", "outboundTag": "blocked", "protocol": [ "bittorrent" ] },
-      { "type": "field", "outboundTag": "blocked", "domain": [ "geosite:porn", "geosite:category-ads-all" ] }
+      { "type": "field", "outboundTag": "blocked", "protocol": [ "bittorrent" ] }
     ]
   },
   "policy": {
