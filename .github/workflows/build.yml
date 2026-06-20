@@ -1,4 +1,4 @@
-name: Build and Push to Docker Hub
+Name: Build and Push to Docker Hub
 
 on:
   push:
@@ -27,5 +27,3 @@ jobs:
           context: .
           push: true
           tags: coomarzon/omar-vless-quota:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
