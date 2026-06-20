@@ -34,9 +34,9 @@ try:
 except Exception as e:
     print(f"[-] Initial config patch error: {e}")
 
-# 3. إطلاق الـ Xray Core
+# 3. إطلاق الـ Xray Core (تمت إضافة أمر run هنا لمنع التضارب)
 print("[+] Launching Xray core engine...")
-xray_proc = subprocess.Popen(["./xray", "-config", CONFIG_PATH])
+xray_proc = subprocess.Popen(["./xray", "run", "-config", CONFIG_PATH])
 
 # مصفوفة المراقبة المحلية لـ الحسابات
 monitored_emails = {u["email"]: u["uuid"] for u in active_users}
