@@ -1,13 +1,18 @@
 {
-  "log": {
-    "loglevel": "warning"
-  },
+  "log": { "loglevel": "info" },
   "api": {
     "tag": "api",
-    "services": ["HandlerService", "StatsService"]
+    "services": [ "HandlerService", "StatsService" ]
   },
   "stats": {},
   "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": { "address": "127.0.0.1" },
+      "tag": "api"
+    },
     {
       "port": 8080,
       "protocol": "vless",
@@ -17,35 +22,33 @@
       },
       "streamSettings": {
         "network": "ws",
-        "wsSettings": {
-          "path": "/@nkka404"
-        }
+        "wsSettings": { "path": "/@nkka404" }
       },
       "tag": "vless-in"
-    },
-    {
-      "listen": "127.0.0.1",
-      "port": 10085,
-      "protocol": "dokodemo-door",
-      "settings": {
-        "address": "127.0.0.1"
-      },
-      "tag": "api"
     }
   ],
   "outbounds": [
-    {
-      "protocol": "freedom",
-      "settings": {}
-    }
+    { "protocol": "freedom", "tag": "direct" },
+    { "protocol": "blackhole", "tag": "blocked" }
   ],
   "routing": {
+    "domainStrategy": "AsIs",
     "rules": [
-      {
-        "type": "field",
-        "inboundTag": ["api"],
-        "outboundTag": "api"
-      }
+      { "type": "field", "inboundTag": [ "api" ], "outboundTag": "api" },
+      { "type": "field", "outboundTag": "blocked", "protocol": [ "bittorrent" ] },
+      { "type": "field", "outboundTag": "blocked", "domain": [ "geosite:porn", "geosite:category-ads-all" ] }
     ]
+  },
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true
+      }
+    },
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true
+    }
   }
 }
