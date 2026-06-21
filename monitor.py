@@ -9,6 +9,9 @@ import re
 VPS_URL = os.getenv("VPS_URL", "http://35.171.3.190:5000")
 XRAY_API_SERVER = "127.0.0.1:10085"
 
+# تعيين المتغير البيئي حتى لا نحتاج تمريره في كل أمر
+os.environ["XRAY_API_SERVER"] = XRAY_API_SERVER
+
 if not os.path.exists("./xray"):
     print("[-] Critical: ./xray binary not found!", flush=True)
     sys.exit(1)
@@ -21,21 +24,22 @@ except Exception as e:
     print(f"[-] Critical: Failed to start Xray Core: {e}", flush=True)
     sys.exit(1)
 
-time.sleep(3)
+time.sleep(5)
+
 print(f"[+] Monitor Daemon Started. Target VPS: {VPS_URL}", flush=True)
 
 def get_user_traffic(email):
     try:
         cmd = [
             "./xray", "api", "statsquery",
-            "-pattern", f"user>>{email}",
-            f"--server={XRAY_API_SERVER}"
+            "-pattern", f"user>>{email}"
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
+
         if res.returncode != 0 or not res.stdout:
             return 0
 
-        # محاولة JSON أولاً
+        # محاولة قراءة JSON أولاً
         try:
             data = json.loads(res.stdout)
             total = 0
@@ -50,19 +54,22 @@ def get_user_traffic(email):
         except:
             pass
 
-        # Regex كحل احتياطي
+        # الاحتياط باستخدام Regex
         values = re.findall(r'"value":\s*"(\d+)"', res.stdout)
         if not values:
             values = re.findall(r'value:\s*(\d+)', res.stdout)
         if values:
             return sum(int(v) for v in values)
+
     except Exception as e:
         print(f"[-] Error parsing traffic for {email}: {e}", flush=True)
     return 0
 
 def report_usage(email, bytes_used):
     try:
-        res = requests.post(f"{VPS_URL}/report_usage", json={"email": email, "bytes": bytes_used}, timeout=5)
+        url = f"{VPS_URL}/report_usage"
+        payload = {"email": email, "bytes": bytes_used}
+        res = requests.post(url, json=payload, timeout=5)
         if res.status_code == 200:
             print(f"[+] Reported {bytes_used} bytes for {email}", flush=True)
             return True
@@ -75,20 +82,23 @@ def fetch_active_users():
         res = requests.get(f"{VPS_URL}/get_active_users", timeout=5)
         if res.status_code == 200:
             return res.json()
+        print(f"[-] Failed fetching users. Code: {res.status_code}", flush=True)
+        return None
     except Exception as e:
         print(f"[-] Network error: {e}", flush=True)
-    return None
+        return None
 
 reported_bytes = {}
 current_xray_users = set()
 
 while True:
-    print("[*] Sync Cycle...", flush=True)
+    print("[*] Starting Sync Cycle...", flush=True)
     active_users = fetch_active_users()
 
     if active_users is not None:
         active_emails = {u["email"] for u in active_users}
 
+        # إضافة المستخدمين
         for user in active_users:
             email = user["email"]
             uuid = user["uuid"]
@@ -97,8 +107,7 @@ while True:
                 cmd = [
                     "./xray", "api",
                     "xray.app.proxyman.command.HandlerService.AlterInbound",
-                    payload,
-                    f"--server={XRAY_API_SERVER}"
+                    payload
                 ]
                 res = subprocess.run(cmd, capture_output=True, text=True)
                 if res.returncode == 0:
@@ -107,24 +116,27 @@ while True:
                 else:
                     print(f"[-] Rejected {email}: {res.stderr.strip()}", flush=True)
 
+        # حساب الاستهلاك
         for email in list(current_xray_users):
             xray_total = get_user_traffic(email)
+
             if xray_total > 0:
                 if email not in reported_bytes:
                     reported_bytes[email] = 0
                 if xray_total < reported_bytes[email]:
                     reported_bytes[email] = 0
                 delta = xray_total - reported_bytes[email]
-                if delta > 0 and report_usage(email, delta):
-                    reported_bytes[email] = xray_total
+                if delta > 0:
+                    if report_usage(email, delta):
+                        reported_bytes[email] = xray_total
 
+            # حذف المستخدمين غير النشطين
             if email not in active_emails:
                 payload = f'tag: "vless-in" operation: {{ remove_user: {{ email: "{email}" }} }}'
                 cmd = [
                     "./xray", "api",
                     "xray.app.proxyman.command.HandlerService.AlterInbound",
-                    payload,
-                    f"--server={XRAY_API_SERVER}"
+                    payload
                 ]
                 res = subprocess.run(cmd, capture_output=True, text=True)
                 if res.returncode == 0:
