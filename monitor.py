@@ -23,9 +23,9 @@ print(f"[+] Monitor Daemon Started. Target VPS: {VPS_URL}", flush=True)
 
 def get_user_traffic(email):
     try:
-        # 🔥 رجعناها reset: False باش الـ Xray ما يمسح والو من الذاكرة وتكون الداتا محمية
         query = {"pattern": f"user>>{email}", "reset": False}
-        cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "xray.app.stats.command.StatsService.QueryStats"]
+        # الاستدعاء الرسمي القصير والمضمون للـ Stats
+        cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "StatsService.QueryStats"]
         res = subprocess.run(cmd, input=json.dumps(query), capture_output=True, text=True)
 
         if res.returncode != 0:
@@ -59,10 +59,10 @@ def report_usage(email, bytes_used):
         res = requests.post(url, json=payload, timeout=5)
         if res.status_code == 200:
             print(f"[+] Successfully reported {bytes_used} bytes to VPS for {email}", flush=True)
-            return True # نرجعو True إذا نجح الإرسال بنجاح للـ VPS
+            return True
     except Exception as e:
         print(f"[-] Failed sending traffic report to VPS: {e}", flush=True)
-    return False # نرجعو False إذا كاين أي مشكل أو تيم آوت
+    return False
 
 def fetch_active_users():
     try:
@@ -75,9 +75,7 @@ def fetch_active_users():
         print(f"[-] Network error fetching users from VPS: {e}", flush=True)
         return None
 
-# 🔥 الذاكرة المحلية لحفظ آخر استهلاك تم إبلاغه للـ VPS بنجاح
 reported_bytes = {}
-
 current_xray_users = set()
 
 while True:
@@ -87,7 +85,7 @@ while True:
     if active_users is not None:
         active_emails = {u["email"] for u in active_users}
 
-        # 1. إضافة المستخدمين الجدد
+        # 1. إضافة المستخدمين الجدد بالفورما القياسية الصحيحة لـ Protobuf Any JSON
         for user in active_users:
             email = user["email"]
             uuid = user["uuid"]
@@ -95,17 +93,16 @@ while True:
                 add_payload = {
                     "tag": "vless-in",
                     "operation": {
-                        "type_url": "type.googleapis.com/xray.app.proxyman.command.AddUserOperation",
-                        "value": {
-                            "user": {
-                                "email": email,
-                                "id": uuid,
-                                "level": 0
-                            }
+                        "@type": "type.googleapis.com/xray.app.proxyman.command.AddUserOperation",
+                        "user": {
+                            "email": email,
+                            "id": uuid,
+                            "level": 0
                         }
                     }
                 }
-                cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "xray.app.proxyman.command.HandlerService.AlterInbound"]
+                # الاستدعاء الرسمي القصير والمضمون للـ Handler
+                cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "HandlerService.AlterInbound"]
                 res = subprocess.run(cmd, input=json.dumps(add_payload), capture_output=True, text=True)
                 
                 if res.returncode == 0:
@@ -114,7 +111,7 @@ while True:
                 else:
                     print(f"[-] Xray rejected injecting user {email}: {res.stderr.strip()}", flush=True)
 
-        # 2. حساب الاستهلاك بالـ Delta وحظر فوري بدون ضياع بايت واحد
+        # 2. حساب الاستهلاك بدقة الـ Delta والحظر الفوري الآمن
         for email in list(current_xray_users):
             xray_total = get_user_traffic(email)
             
@@ -122,32 +119,31 @@ while True:
                 if email not in reported_bytes:
                     reported_bytes[email] = 0
                 
-                # حساب الـ Delta (الزيادة الجديدة برك من آخر إرسال ناجح)
+                if xray_total < reported_bytes[email]:
+                    reported_bytes[email] = 0
+                
                 delta_bytes = xray_total - reported_bytes[email]
                 
                 if delta_bytes > 0:
-                    # نبعثو الزيادة فقط للـ VPS، وإذا نجحت 200 OK نحدثو العداد المحلي ديريكت
                     if report_usage(email, delta_bytes):
                         reported_bytes[email] = xray_total
-                        print(f"[+] Local cache updated for {email} to {xray_total} bytes", flush=True)
 
+            # الحذف بالفورما الرسمية القصير عبر الـ stdin
             if email not in active_emails:
                 remove_payload = {
                     "tag": "vless-in",
                     "operation": {
-                        "type_url": "type.googleapis.com/xray.app.proxyman.command.RemoveUserOperation",
-                        "value": {
-                            "email": email
-                        }
+                        "@type": "type.googleapis.com/xray.app.proxyman.command.RemoveUserOperation",
+                        "email": email
                     }
                 }
-                cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "xray.app.proxyman.command.HandlerService.AlterInbound"]
+                cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "HandlerService.AlterInbound"]
                 res = subprocess.run(cmd, input=json.dumps(remove_payload), capture_output=True, text=True)
                 
                 if res.returncode == 0:
                     current_xray_users.remove(email)
                     if email in reported_bytes:
-                        del reported_bytes[email] # تنظيف الذاكرة للمستخدم المحظور
+                        del reported_bytes[email]
                     print(f"[-] Blocked and removed user from Xray: {email}", flush=True)
                 else:
                     print(f"[-] Failed removing user {email}: {res.stderr.strip()}", flush=True)
