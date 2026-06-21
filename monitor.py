@@ -9,9 +9,9 @@ import re
 VPS_URL = os.getenv("VPS_URL", "http://35.171.3.190:5000")
 XRAY_API_SERVER = "127.0.0.1:10085"
 
-# 🛠️ التحسين تع كلاود: التأكد من وجود الـ Binary قبل التشغيل لتفادي الكراش الصامت
+# التأكد من وجود الـ Binary لتفادي الكراش الصامت
 if not os.path.exists("./xray"):
-    print("[-] Critical: ./xray binary not found in current directory!", flush=True)
+    print("[-] Critical: ./xray binary not found!", flush=True)
     sys.exit(1)
 
 print("[*] Launching Xray Core inside container...", flush=True)
@@ -28,20 +28,33 @@ print(f"[+] Monitor Daemon Started. Target VPS: {VPS_URL}", flush=True)
 
 def get_user_traffic(email):
     try:
-        payload = f'pattern: "user>>{email}" reset: false'
         cmd = [
-            "./xray", "api",
+            "./xray", "api", "statsquery",
             f"--server={XRAY_API_SERVER}",
-            "xray.app.stats.command.StatsService.QueryStats",
-            payload
+            "-pattern", f"user>>{email}"
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
 
         if res.returncode != 0 or not res.stdout:
             return 0
 
-        # قراءة الميڨات بدقة بالـ Regex من الـ Textproto اللّي يرجع
-        values = re.findall(r'value:\s*(\d+)', res.stdout)
+        # 🛠️ تحسين كلاود 1: محاولة قراءة JSON كخط دفاع أول (أكثر أماناً)
+        try:
+            data = json.loads(res.stdout)
+            if "stat" in data and isinstance(data["stat"], list):
+                total_bytes = 0
+                for item in data["stat"]:
+                    total_bytes += int(item.get("value", 0))
+                if total_bytes > 0:
+                    return total_bytes
+        except:
+            pass
+
+        # الاحتياط بالـ Regex لو الـ JSON يفشل
+        values = re.findall(r'"value":\s*"(\d+)"', res.stdout)
+        if not values:
+            values = re.findall(r'value:\s*(\d+)', res.stdout)
+            
         if values:
             return sum(int(v) for v in values)
 
@@ -82,16 +95,17 @@ while True:
     if active_users is not None:
         active_emails = {u["email"] for u in active_users}
 
-        # 1. إضافة المستخدمين بالـ textproto الصحيح والنهائي (add_user)
+        # 1. إضافة المستخدمين بالـ textproto المصحح والـ Timeout
         for user in active_users:
             email = user["email"]
             uuid = user["uuid"]
             if email not in current_xray_users:
-                # الفورما القياسية الصخرة اللّي يقبلها الـ Go Parser بدون مشاكل
                 payload = f'tag: "vless-in" operation: {{ add_user: {{ user: {{ email: "{email}" id: "{uuid}" }} }} }}'
+                # 🛠️ تحسين كلاود 2: إضافة --timeout=5s لمنع الـ Hang
                 cmd = [
-                    "./xray", "api",
+                    "./xray", "api", "call",
                     f"--server={XRAY_API_SERVER}",
+                    "--timeout=5s",
                     "xray.app.proxyman.command.HandlerService.AlterInbound",
                     payload
                 ]
@@ -118,12 +132,13 @@ while True:
                     if report_usage(email, delta_bytes):
                         reported_bytes[email] = xray_total
 
-            # 3. الحظر والـ الحذف بالـ textproto الصحيح (remove_user)
+            # 3. الحظر والـ الحذف بالفورما الصحيحة والـ Timeout
             if email not in active_emails:
                 payload = f'tag: "vless-in" operation: {{ remove_user: {{ email: "{email}" }} }}'
                 cmd = [
-                    "./xray", "api",
+                    "./xray", "api", "call",
                     f"--server={XRAY_API_SERVER}",
+                    "--timeout=5s",
                     "xray.app.proxyman.command.HandlerService.AlterInbound",
                     payload
                 ]
