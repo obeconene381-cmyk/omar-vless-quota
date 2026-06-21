@@ -7,7 +7,6 @@ import subprocess
 import re
 
 VPS_URL = os.getenv("VPS_URL", "http://35.171.3.190:5000")
-XRAY_API_SERVER = "127.0.0.1:10085"
 
 print("[*] Launching Xray Core inside container...", flush=True)
 try:
@@ -24,8 +23,8 @@ print(f"[+] Monitor Daemon Started. Target VPS: {VPS_URL}", flush=True)
 def get_user_traffic(email):
     try:
         query = {"pattern": f"user>>{email}", "reset": False}
-        # الاستدعاء الرسمي القصير والمضمون للـ Stats
-        cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "StatsService.QueryStats"]
+        # أمر نظيف قبالة وبدون أي فلاغات سيرفر تسبب مشاكل للـ Go Parser
+        cmd = ["./xray", "api", "StatsService.QueryStats"]
         res = subprocess.run(cmd, input=json.dumps(query), capture_output=True, text=True)
 
         if res.returncode != 0:
@@ -85,7 +84,7 @@ while True:
     if active_users is not None:
         active_emails = {u["email"] for u in active_users}
 
-        # 1. إضافة المستخدمين الجدد بالفورما القياسية الصحيحة لـ Protobuf Any JSON
+        # 1. إضافة المستخدمين الجدد بالأمر الصافي المضمون
         for user in active_users:
             email = user["email"]
             uuid = user["uuid"]
@@ -101,8 +100,7 @@ while True:
                         }
                     }
                 }
-                # الاستدعاء الرسمي القصير والمضمون للـ Handler
-                cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "HandlerService.AlterInbound"]
+                cmd = ["./xray", "api", "HandlerService.AlterInbound"]
                 res = subprocess.run(cmd, input=json.dumps(add_payload), capture_output=True, text=True)
                 
                 if res.returncode == 0:
@@ -111,24 +109,21 @@ while True:
                 else:
                     print(f"[-] Xray rejected injecting user {email}: {res.stderr.strip()}", flush=True)
 
-        # 2. حساب الاستهلاك بدقة الـ Delta والحظر الفوري الآمن
+        # 2. حساب الاستهلاك والحظر الفوري بالـ Delta
         for email in list(current_xray_users):
             xray_total = get_user_traffic(email)
             
             if xray_total > 0:
                 if email not in reported_bytes:
                     reported_bytes[email] = 0
-                
                 if xray_total < reported_bytes[email]:
                     reported_bytes[email] = 0
                 
                 delta_bytes = xray_total - reported_bytes[email]
-                
                 if delta_bytes > 0:
                     if report_usage(email, delta_bytes):
                         reported_bytes[email] = xray_total
 
-            # الحذف بالفورما الرسمية القصير عبر الـ stdin
             if email not in active_emails:
                 remove_payload = {
                     "tag": "vless-in",
@@ -137,7 +132,7 @@ while True:
                         "email": email
                     }
                 }
-                cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "HandlerService.AlterInbound"]
+                cmd = ["./xray", "api", "HandlerService.AlterInbound"]
                 res = subprocess.run(cmd, input=json.dumps(remove_payload), capture_output=True, text=True)
                 
                 if res.returncode == 0:
