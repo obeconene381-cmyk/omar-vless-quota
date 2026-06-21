@@ -1,17 +1,22 @@
 FROM alpine:latest
 
-# 1. تحديث النظام وتركيب بايثون، مدير الحزم pip، والملحقات الضرورية
-RUN apk update && apk add --no-cache python3 py3-pip bash curl unzip
-
-# 2. تركيب مكتبة requests باستخدام pip
-RUN pip3 install --no-cache-dir requests --break-system-packages
+RUN apk add --no-cache python3 py3-requests bash curl
 
 WORKDIR /app
-COPY . .
 
-# 3. تحميل الـ Xray Core
-RUN curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
-    unzip xray.zip && rm xray.zip && chmod +x xray
+COPY xray /app/xray
+COPY config.json /app/config.json
+COPY monitor.py /app/monitor.py
 
-EXPOSE 8080
-CMD ["python3", "monitor.py"]
+RUN chmod +x /app/xray
+
+# حظر الـ buffering لضمان خروج الكود لايف للتيرمينال
+ENV PYTHONUNBUFFERED=1
+
+RUN echo $'#!/bin/bash\n\
+./xray -config config.json &\n\
+sleep 2\n\
+python3 -u monitor.py\n\
+' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+CMD ["/app/entrypoint.sh"]
