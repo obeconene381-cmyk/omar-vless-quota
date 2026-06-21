@@ -7,6 +7,12 @@ import subprocess
 import re
 
 VPS_URL = os.getenv("VPS_URL", "http://35.171.3.190:5000")
+XRAY_API_SERVER = "127.0.0.1:10085"
+
+# 🛠️ التحسين تع كلاود: التأكد من وجود الـ Binary قبل التشغيل لتفادي الكراش الصامت
+if not os.path.exists("./xray"):
+    print("[-] Critical: ./xray binary not found in current directory!", flush=True)
+    sys.exit(1)
 
 print("[*] Launching Xray Core inside container...", flush=True)
 try:
@@ -22,10 +28,10 @@ print(f"[+] Monitor Daemon Started. Target VPS: {VPS_URL}", flush=True)
 
 def get_user_traffic(email):
     try:
-        # نظام لبارح النصي (Text Proto) المضمون، مع reset: false لحماية الحساب
         payload = f'pattern: "user>>{email}" reset: false'
         cmd = [
             "./xray", "api",
+            f"--server={XRAY_API_SERVER}",
             "xray.app.stats.command.StatsService.QueryStats",
             payload
         ]
@@ -34,7 +40,7 @@ def get_user_traffic(email):
         if res.returncode != 0 or not res.stdout:
             return 0
 
-        # قراءة الميڨات ديريكت من النص بالـ Regex كيما كانت تنجحلك لبارح
+        # قراءة الميڨات بدقة بالـ Regex من الـ Textproto اللّي يرجع
         values = re.findall(r'value:\s*(\d+)', res.stdout)
         if values:
             return sum(int(v) for v in values)
@@ -66,7 +72,6 @@ def fetch_active_users():
         print(f"[-] Network error fetching users from VPS: {e}", flush=True)
         return None
 
-# الذاكرة المحلية لمنع تضارب الـ 8 أجهزة وحساب الزيادة فقط
 reported_bytes = {}
 current_xray_users = set()
 
@@ -77,14 +82,16 @@ while True:
     if active_users is not None:
         active_emails = {u["email"] for u in active_users}
 
-        # 1. إضافة المستخدمين بالـ Textproto الأصلي تاعك (بدون أي فلاغ سيرفر)
+        # 1. إضافة المستخدمين بالـ textproto الصحيح والنهائي (add_user)
         for user in active_users:
             email = user["email"]
             uuid = user["uuid"]
             if email not in current_xray_users:
-                payload = f'tag: "vless-in" operation: ADD_USER value: {{ "user": {{ "email": "{email}", "id": "{uuid}" }} }}'
+                # الفورما القياسية الصخرة اللّي يقبلها الـ Go Parser بدون مشاكل
+                payload = f'tag: "vless-in" operation: {{ add_user: {{ user: {{ email: "{email}" id: "{uuid}" }} }} }}'
                 cmd = [
                     "./xray", "api",
+                    f"--server={XRAY_API_SERVER}",
                     "xray.app.proxyman.command.HandlerService.AlterInbound",
                     payload
                 ]
@@ -95,7 +102,7 @@ while True:
                 else:
                     print(f"[-] Xray rejected injecting user {email}: {res.stderr.strip()}", flush=True)
 
-        # 2. حساب الاستهلاك بالـ Delta الآمن ديريكت
+        # 2. حساب الاستهلاك بالـ Delta الآمن
         for email in list(current_xray_users):
             xray_total = get_user_traffic(email)
             
@@ -111,11 +118,12 @@ while True:
                     if report_usage(email, delta_bytes):
                         reported_bytes[email] = xray_total
 
-            # 3. الحظر بالفورما النصية تع لبارح
+            # 3. الحظر والـ الحذف بالـ textproto الصحيح (remove_user)
             if email not in active_emails:
-                payload = f'tag: "vless-in" operation: REMOVE_USER value: {{ "user": {{ "email": "{email}" }} }}'
+                payload = f'tag: "vless-in" operation: {{ remove_user: {{ email: "{email}" }} }}'
                 cmd = [
                     "./xray", "api",
+                    f"--server={XRAY_API_SERVER}",
                     "xray.app.proxyman.command.HandlerService.AlterInbound",
                     payload
                 ]
