@@ -1,141 +1,116 @@
 import os
-import json
+import sys
 import time
-import subprocess
+import json
 import requests
+import subprocess
+import re
 
-VPS_URL = os.environ.get("VPS_URL", "http://127.0.0.1:5000")
-CONFIG_PATH = "config.json"
+VPS_URL = os.getenv("VPS_URL", "http://35.171.3.190:5000")
 XRAY_API_SERVER = "127.0.0.1:10085"
 
-print(f"[+] Booting Cloud Run Core. Targeted VPS Backend: {VPS_URL}")
-
-# 1. جلب المستخدمين عند الإقلاع
-active_users = []
-try:
-    res = requests.get(f"{VPS_URL}/get_active_users", timeout=10)
-    if res.status_code == 200:
-        active_users = res.json()
-        print(f"[+] Loaded {len(active_users)} active users from VPS at boot.")
-except Exception as e:
-    print(f"[-] Boot fetch failed: {e}")
-
-# 2. حقن إعدادات المستخدمين الأوائل في الكود
-try:
-    with open(CONFIG_PATH, "r") as f:
-        config = json.load(f)
-    clients = [{"id": u["uuid"], "level": 0, "email": u["email"]} for u in active_users]
-    for inbound in config.get("inbounds", []):
-        if inbound.get("tag") == "vless-in":
-            inbound["settings"]["clients"] = clients
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(config, f, indent=2)
-    print("[+] Initial config patched successfully.")
-except Exception as e:
-    print(f"[-] Initial config patch error: {e}")
-
-# 3. إطلاق الـ Xray Core (تمت إضافة أمر run هنا لمنع التضارب)
-print("[+] Launching Xray core engine...")
-xray_proc = subprocess.Popen(["./xray", "run", "-config", CONFIG_PATH])
-
-# مصفوفة المراقبة المحلية لـ الحسابات
-monitored_emails = {u["email"]: u["uuid"] for u in active_users}
-time.sleep(5)  # وقت آمن لفتح بورت الـ API لداخل
+print(f"[+] Monitor Daemon Started. Target VPS: {VPS_URL}", flush=True)
 
 def get_user_traffic(email):
     try:
-        payload = {"pattern": email, "reset": True}
-        cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "xray.app.stats.command.StatsService.QueryStats"]
-        res = subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
+        # استعمال QueryStats بـ pattern يجيب الـ Uplink والـ Downlink في سطر واحد وبأقل استهلاك CPU
+        cmd = f'./xray api --server={XRAY_API_SERVER} xray.app.stats.command.StatsService.QueryStats \'pattern: "user>>{email}" reset: true\''
+        res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         
-        # 1. إذا الأداة تع الـ API خرجت خطأ نطبعوه ديريكت
         if res.returncode != 0:
-            print(f"[-] Xray API Exec Error for {email}: {res.stderr}")
+            if res.stderr:
+                print(f"[-] Xray API Stats Error for {email}: {res.stderr.strip()}", flush=True)
             return 0
             
-        # 2. نطبعوا واش رجع الـ Xray بالظبط عيني عينك
-        if res.stdout:
-            print(f"[+] Raw Xray API Output for {email}: {res.stdout.strip()}")
-            data = json.loads(res.stdout)
-            if "stat" in data:
-                return sum(int(item.get("value", 0)) for item in data["stat"])
+        if not res.stdout or not res.stdout.strip():
+            return 0
+
+        output = res.stdout.strip()
+        total_bytes = 0
+
+        # المحاولة 1: إذا كان المخرج تع الـ Xray عبارة عن JSON مريڨل
+        try:
+            data = json.loads(output)
+            if "stat" in data and isinstance(data["stat"], list):
+                for item in data["stat"]:
+                    total_bytes += int(item.get("value", 0))
+                if total_bytes > 0:
+                    print(f"[+] Traffic detected (JSON) for {email}: {total_bytes} bytes", flush=True)
+                return total_bytes
+        except json.JSONDecodeError:
+            # المحاولة 2: إذا كان المخرج عبارة عن text-proto (value: 12345) نلقطوه بالـ Regex
+            values = re.findall(r'value:\s*(\d+)', output)
+            if values:
+                total_bytes = sum(int(v) for v in values)
+                print(f"[+] Traffic detected (Regex) for {email}: {total_bytes} bytes", flush=True)
+                return total_bytes
                 
     except Exception as e:
-        # 3. إذا صرى بڨ في الـ Python (كيما الكاست تع الـ Int ولا الـ JSON) يخرج هنا
-        print(f"[-] Python Stats Parsing Crash for {email}: {e}")
+        print(f"[-] Critical Error parsing traffic for {email}: {e}", flush=True)
     return 0
 
+def report_usage(email, bytes_used):
+    try:
+        url = f"{VPS_URL}/report_usage"
+        payload = {"email": email, "bytes": bytes_used}
+        res = requests.post(url, json=payload, timeout=5)
+        if res.status_code == 200:
+            print(f"[+] Successfully reported {bytes_used} bytes to VPS for {email}", flush=True)
+        else:
+            print(f"[-] VPS refused stats with code {res.status_code} for {email}", flush=True)
+    except Exception as e:
+        print(f"[-] Failed sending traffic report to VPS: {e}", flush=True)
 
-def block_user_instantly(email):
-    print(f"[-] [Block Action] Removing user from Xray memory: {email}")
-    payload = {
-        "tag": "vless-in",
-        "operation": {
-            "@type": "type.googleapis.com/xray.app.proxyman.command.RemoveUserOperation",
-            "email": email
-        }
-    }
-    cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "xray.app.proxyman.command.HandlerService.AlterInbound"]
-    subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
+def fetch_active_users():
+    try:
+        res = requests.get(f"{VPS_URL}/get_active_users", timeout=5)
+        if res.status_code == 200:
+            return res.json()
+        print(f"[-] Failed fetching users from VPS. Code: {res.status_code}", flush=True)
+        return None  # نرجع None باش نفرقو بين الغلطة وبين السيرفر الفارغ بالصح
+    except Exception as e:
+        print(f"[-] Network error fetching users from VPS: {e}", flush=True)
+        return None
 
-def add_user_instantly(email, uuid_str):
-    print(f"[+] [Add Action] Injecting new user dynamically into Xray: {email}")
-    payload = {
-        "tag": "vless-in",
-        "operation": {
-            "@type": "type.googleapis.com/xray.app.proxyman.command.AddUserOperation",
-            "user": {
-                "email": email, "level": 0,
-                "account": { "@type": "type.googleapis.com/xray.proxy.vless.Account", "id": uuid_str }
-            }
-        }
-    }
-    cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "xray.app.proxyman.command.HandlerService.AlterInbound"]
-    subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
-
-loop_count = 0
-print("[+] Dynamic core loops engaged successfully.")
+current_xray_users = set()
 
 while True:
-    if xray_proc.poll() is not None:
-        print("[-] Xray core stopped unexpectedly. Exiting container.")
-        break
+    print("[*] Starting Sync Cycle...", flush=True)
+    active_users = fetch_active_users()
     
-    # أ. دورة حساب الميڨات (كل 10 ثواني)
-    for email in list(monitored_emails.keys()):
-        usage_bytes = get_user_traffic(email)
-        if usage_bytes > 0:
-            try:
-                response = requests.post(f"{VPS_URL}/report_usage", json={"email": email, "bytes": usage_bytes}, timeout=5)
-                # إذا الـ VPS لقى المستخدم خلص، اقطع عليه في أجزاء تع الثانية قبالة
-                if response.status_code == 200 and response.json().get("status") == "block":
-                    block_user_instantly(email)
-                    if email in monitored_emails: del monitored_emails[email]
-            except Exception as e:
-                print(f"[-] Traffic report error for {email}: {e}")
-                
-    # ب. دورة تحديث القائمة الخلفية (كل 30 ثانية تعس الـ VPS قبالة)
-    loop_count += 1
-    if loop_count >= 3:
-        loop_count = 0
-        try:
-            res = requests.get(f"{VPS_URL}/get_active_users", timeout=5)
-            if res.status_code == 200:
-                vps_users = res.json()
-                vps_emails = {u["email"] for u in vps_users}
-                
-                # إضافة المشتركين الجدد لي تزادو فالبوت درك
-                for u in vps_users:
-                    if u["email"] not in monitored_emails:
-                        add_user_instantly(u["email"], u["uuid"])
-                        monitored_emails[u["email"]] = u["uuid"]
-                        
-                # طرد الحسابات لي تبلوكات ولا تحذفت يدوياً من البوت
-                for email in list(monitored_emails.keys()):
-                    if email not in vps_emails:
-                        block_user_instantly(email)
-                        del monitored_emails[email]
-        except Exception as e:
-            print(f"[-] Background sync loop error: {e}")
-            
-    time.sleep(10)
+    # حماية: إذا صرى بڨ في جلب المستخدمين مانحذفوش الناس ديجا شغالين
+    if active_users is not None:
+        active_emails = {u["email"] for u in active_users}
+
+        # 1. إضافة المستخدمين الجدد (المصلوح لي كان ديجا يمشي وملمسناهش)
+        for user in active_users:
+            email = user["email"]
+            uuid = user["uuid"]
+            if email not in current_xray_users:
+                cmd = f'./xray api --server={XRAY_API_SERVER} xray.app.proxyman.command.HandlerService.AlterInbound \'tag: "vless-in" operation: ADD_USER value: {{ "user": {{ "email": "{email}", "id": "{uuid}" }} }}\''
+                res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                if res.returncode == 0:
+                    current_xray_users.add(email)
+                    print(f"[+] Successfully injected user to Xray: {email}", flush=True)
+                else:
+                    print(f"[-] Xray rejected injecting user {email}: {res.stderr}", flush=True)
+
+        # 2. حساب الاستهلاك + الحظر ذكي ديريكت
+        for email in list(current_xray_users):
+            bytes_used = get_user_traffic(email)
+            if bytes_used > 0:
+                report_usage(email, bytes_used)
+
+            # الحظر يصرا فقط إذا كان السيرفر شغال ورسمي الإيميل مش لداخل القائمة النشطة
+            if email not in active_emails:
+                cmd = f'./xray api --server={XRAY_API_SERVER} xray.app.proxyman.command.HandlerService.AlterInbound \'tag: "vless-in" operation: REMOVE_USER value: "{email}"\''
+                res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                if res.returncode == 0:
+                    current_xray_users.remove(email)
+                    print(f"[-] Blocked and removed user from Xray memory: {email}", flush=True)
+                else:
+                    print(f"[-] Failed removing user {email} from Xray memory: {res.stderr}", flush=True)
+    else:
+        print("[!] Sync skipped to protect current sessions from transient network timeout.", flush=True)
+
+    time.sleep(15)
