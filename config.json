@@ -50,7 +50,8 @@
       "port": 10085,
       "protocol": "dokodemo-door",
       "settings": {
-        "address": "127.0.0.1"
+        "address": "127.0.0.1",
+        "port": 0
       },
       "tag": "api"
     }
@@ -68,14 +69,6 @@
     }
   ],
   "routing": {
-    "rules": [
-      {
-        "type": "field",
-        "inboundTag": [
-          "api"
-        ],
-        "outboundTag": "api"
-      }
-    ]
+    "rules": []
   }
 }
