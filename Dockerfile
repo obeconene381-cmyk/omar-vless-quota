@@ -1,22 +1,19 @@
 FROM alpine:latest
 
-RUN apk add --no-cache python3 py3-requests bash curl
+# 1. تحديث النظام وتركيب بايثون، مدير الحزم pip، والملحقات الضرورية
+RUN apk update && apk add --no-cache python3 py3-pip bash curl unzip
+
+# 2. تركيب مكتبة requests باستخدام pip
+RUN pip3 install --no-cache-dir requests --break-system-packages
 
 WORKDIR /app
+COPY . .
 
-COPY xray /app/xray
-COPY config.json /app/config.json
-COPY monitor.py /app/monitor.py
+# 3. تحميل الـ Xray Core
+RUN curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
+    unzip xray.zip && rm xray.zip && chmod +x xray
 
-RUN chmod +x /app/xray
+EXPOSE 8080
 
-# حظر الـ buffering لضمان خروج الكود لايف للتيرمينال
-ENV PYTHONUNBUFFERED=1
-
-RUN echo $'#!/bin/bash\n\
-./xray -config config.json &\n\
-sleep 2\n\
-python3 -u monitor.py\n\
-' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
-
-CMD ["/app/entrypoint.sh"]
+# التعديل هنا: زدت -u باش اللوڨز يخرجوا لايف في نفس الملي ثانية لقوقل كلاود
+CMD ["python3", "-u", "monitor.py"]
