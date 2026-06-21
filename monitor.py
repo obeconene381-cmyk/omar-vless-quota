@@ -11,7 +11,6 @@ XRAY_API_SERVER = "127.0.0.1:10085"
 
 print("[*] Launching Xray Core inside container...", flush=True)
 try:
-    # الـ Xray يقلع هنا وهو لي راح يشد البورت 8080 لي يحبو كلاود ران ديريكت
     subprocess.Popen(["./xray", "-config", "config.json"])
     print("[+] Xray Core launched successfully in background.", flush=True)
 except Exception as e:
@@ -90,7 +89,6 @@ while True:
     if active_users is not None:
         active_emails = {u["email"] for u in active_users}
 
-        # 1. إضافة المستخدمين الجدد
         for user in active_users:
             email = user["email"]
             uuid = user["uuid"]
@@ -109,7 +107,6 @@ while True:
                 else:
                     print(f"[-] Xray rejected injecting user {email}: {res.stderr.strip()}", flush=True)
 
-        # 2. حساب الاستهلاك والحظر الفوري
         for email in list(current_xray_users):
             bytes_used = get_user_traffic(email)
             if bytes_used > 0:
