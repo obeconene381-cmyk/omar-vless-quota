@@ -44,16 +44,27 @@ time.sleep(5)  # وقت آمن لفتح بورت الـ API لداخل
 
 def get_user_traffic(email):
     try:
-        # نظام الـ Delta: نلقط الاستهلاك تع الآخر 10 ثواني برك ونصفر
         payload = {"pattern": email, "reset": True}
         cmd = ["./xray", "api", f"--server={XRAY_API_SERVER}", "xray.app.stats.command.StatsService.QueryStats"]
         res = subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True)
-        if res.returncode == 0 and res.stdout:
+        
+        # 1. إذا الأداة تع الـ API خرجت خطأ نطبعوه ديريكت
+        if res.returncode != 0:
+            print(f"[-] Xray API Exec Error for {email}: {res.stderr}")
+            return 0
+            
+        # 2. نطبعوا واش رجع الـ Xray بالظبط عيني عينك
+        if res.stdout:
+            print(f"[+] Raw Xray API Output for {email}: {res.stdout.strip()}")
             data = json.loads(res.stdout)
             if "stat" in data:
                 return sum(int(item.get("value", 0)) for item in data["stat"])
-    except: pass
+                
+    except Exception as e:
+        # 3. إذا صرى بڨ في الـ Python (كيما الكاست تع الـ Int ولا الـ JSON) يخرج هنا
+        print(f"[-] Python Stats Parsing Crash for {email}: {e}")
     return 0
+
 
 def block_user_instantly(email):
     print(f"[-] [Block Action] Removing user from Xray memory: {email}")
