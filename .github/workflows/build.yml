@@ -26,4 +26,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: coomarzon/omar-vless-quota:v6
+          tags: coomarzon/omar-vless-quota:v7
