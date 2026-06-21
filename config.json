@@ -1,43 +1,15 @@
 {
-  "log": { "loglevel": "info" },
+  "log": {
+    "loglevel": "info"
+  },
   "api": {
     "tag": "api",
-    "services": [ "HandlerService", "StatsService" ]
-  },
-  "stats": {},
-  "inbounds": [
-    {
-      "listen": "127.0.0.1",
-      "port": 10085,
-      "protocol": "dokodemo-door",
-      "settings": { "address": "127.0.0.1" },
-      "tag": "api"
-    },
-    {
-      "port": 8080,
-      "protocol": "vless",
-      "settings": {
-        "clients": [],
-        "decryption": "none"
-      },
-      "streamSettings": {
-        "network": "ws",
-        "wsSettings": { "path": "/@nkka404" }
-      },
-      "tag": "vless-in"
-    }
-  ],
-  "outbounds": [
-    { "protocol": "freedom", "tag": "direct" },
-    { "protocol": "blackhole", "tag": "blocked" }
-  ],
-  "routing": {
-    "domainStrategy": "AsIs",
-    "rules": [
-      { "type": "field", "inboundTag": [ "api" ], "outboundTag": "api" },
-      { "type": "field", "outboundTag": "blocked", "protocol": [ "bittorrent" ] }
+    "services": [
+      "HandlerService",
+      "StatsService"
     ]
   },
+  "stats": {},
   "policy": {
     "levels": {
       "0": {
@@ -49,5 +21,38 @@
       "statsInboundUplink": true,
       "statsInboundDownlink": true
     }
-  }
+  },
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      },
+      "tag": "api"
+    },
+    {
+      "port": 8080,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "wsSettings": {
+          "path": "/@nkka404"
+        }
+      },
+      "tag": "vless-in"
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "settings": {},
+      "tag": "direct"
+    }
+  ]
 }
