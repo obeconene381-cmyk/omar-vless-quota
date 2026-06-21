@@ -1,13 +1,8 @@
 {
-  "log": {
-    "loglevel": "info"
-  },
+  "log": { "loglevel": "info" },
   "api": {
     "tag": "api",
-    "services": [
-      "HandlerService",
-      "StatsService"
-    ]
+    "services": ["HandlerService", "StatsService"]
   },
   "stats": {},
   "policy": {
@@ -27,9 +22,7 @@
       "listen": "127.0.0.1",
       "port": 10085,
       "protocol": "dokodemo-door",
-      "settings": {
-        "address": "127.0.0.1"
-      },
+      "settings": { "address": "127.0.0.1" },
       "tag": "api"
     },
     {
@@ -41,9 +34,7 @@
       },
       "streamSettings": {
         "network": "ws",
-        "wsSettings": {
-          "path": "/@nkka404"
-        }
+        "wsSettings": { "path": "/@nkka404" }
       },
       "tag": "vless-in"
     }
